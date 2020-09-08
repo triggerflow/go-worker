@@ -1,4 +1,4 @@
-package definitions
+package config
 
 type TriggerflowConfigMap struct {
 	TriggerflowController struct {
@@ -11,4 +11,4 @@ type TriggerflowConfigMap struct {
 	} `yaml:"trigger_storage"`
 }
 
-var ConfigMap TriggerflowConfigMap
+var Map TriggerflowConfigMap

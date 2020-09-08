@@ -4,33 +4,41 @@ import (
 	"encoding/json"
 	"fmt"
 	cloudevents "github.com/cloudevents/sdk-go"
+	log "github.com/sirupsen/logrus"
+	"sync/atomic"
 	"time"
 )
 
 type Join struct {
-	Join int
+	Join    int    `json:"join"`
+	Counter uint32 `json:"counter"`
 }
 
-func SimpleJoinDataParser(rawData json.RawMessage) interface{} {
+func PassDataParser(rawData []byte) (interface{}, error) {
+	return nil, nil
+}
+
+func JoinDataParser(rawData []byte) (interface{}, error) {
 	data := Join{}
 	err := json.Unmarshal(rawData, &data)
 	if err != nil {
-		panic(err)
+		return nil, err
+	} else {
+		return &data, nil
 	}
-	return &data
 }
 
-func SimpleJoinCondition(context *Context, event cloudevents.Event) bool {
-	(*context).Counter++
-	contextData := (*context).ParsedData.(*Join)
-	return (*context).Counter >= (*contextData).Join
+func JoinCondition(context *Context, event cloudevents.Event) (bool, error) {
+	parsedData := (*context).ConditionParsedData.(*Join)
+	cnt := int(atomic.AddUint32(&parsedData.Counter, 1))
+	return cnt >= parsedData.Join, nil
 }
 
-func TrueCondition(context *Context, event cloudevents.Event) bool {
-	return true
+func TrueCondition(context *Context, event cloudevents.Event) (bool, error) {
+	return true, nil
 }
 
-func CounterThresholdCondition(context *Context, event cloudevents.Event) bool {
+func CounterThresholdCondition(context *Context, event cloudevents.Event) (bool, error) {
 	//(*context).Counter++
 	//
 	//totalActivations := 0
@@ -41,15 +49,17 @@ func CounterThresholdCondition(context *Context, event cloudevents.Event) bool {
 	//joined := (*context).Counter >= totalActivations
 	//
 	//return joined
-	return true
+	return false, nil
 }
 
-func PassAction(context *Context, event cloudevents.Event) {
-
+func PassAction(context *Context, event cloudevents.Event) error {
+	return nil
 }
 
-func TerminateAction(context *Context, event cloudevents.Event) {
+func TerminateAction(context *Context, event cloudevents.Event) error {
 	// TODO implement worker halt
-	fmt.Println(context.Counter, time.Now().UTC().UnixNano())
-	//log.Infof("Terminate worker call")
+	//fmt.Println(context.ConditionParsedData.(Join).Counter, time.Now().UTC().UnixNano())
+	fmt.Println(time.Now().UTC().UnixNano())
+	log.Infof("Terminate worker call")
+	return nil
 }

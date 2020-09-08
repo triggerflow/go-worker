@@ -16,12 +16,12 @@ type RedisEventSource struct {
 	client      *redis.Client
 	workspace   string
 	stream      string
-	eventSink   chan cloudevents.Event
+	eventSink   chan *cloudevents.Event
 	records     []string
 	recordsLock sync.Mutex
 }
 
-func CreateRedisEventSource(workspace string, eventSink chan cloudevents.Event,
+func CreateRedisEventSource(workspace string, eventSink chan *cloudevents.Event,
 	stream string, host string, port int, password string, db int) EventSource {
 	var (
 		statusCmd *redis.StatusCmd
@@ -54,7 +54,7 @@ func CreateRedisEventSource(workspace string, eventSink chan cloudevents.Event,
 	return redisEventSource
 }
 
-func CreateRedisEventSourceMappedConfig(workspace string, eventSink chan cloudevents.Event,
+func CreateRedisEventSourceMappedConfig(workspace string, eventSink chan *cloudevents.Event,
 	config json.RawMessage) EventSource {
 
 	stream := fastjson.GetString(config, "stream")
@@ -105,7 +105,7 @@ func (redisEs *RedisEventSource) StartConsuming() {
 				}
 
 				//redisEs.recordsLock.Lock()
-				redisEs.eventSink <- cloudevent
+				redisEs.eventSink <- &cloudevent
 				//redisEs.records = append(redisEs.records, ID)
 				//redisEs.recordsLock.Unlock()
 
@@ -114,16 +114,12 @@ func (redisEs *RedisEventSource) StartConsuming() {
 	}
 }
 
-func (redisEs *RedisEventSource) Pause() {
-	redisEs.recordsLock.Lock()
-}
-
-func (redisEs *RedisEventSource) Resume() {
-	redisEs.recordsLock.Unlock()
-}
-
-func (redisEs *RedisEventSource) CommitEvents() {
+func (redisEs *RedisEventSource) CommitEvents(subject string) {
 	log.Infof("[RedisEventSource] Going to commit %d events", len(redisEs.records))
 	redisEs.client.XDel(redisEs.stream, redisEs.records...)
 	redisEs.records = make([]string, 0)
+}
+
+func (redisEs *RedisEventSource) Stop() {
+	panic("implement me")
 }

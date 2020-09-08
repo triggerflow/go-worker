@@ -28,7 +28,7 @@ type IBMCloudFunctionsOperator struct {
 	Sink         json.RawMessage          `json:"sink"`
 }
 
-func IBMCloudFunctionsInvoke(context *Context, event cloudevents.Event) {
+func IBMCloudFunctionsInvoke(context *Context, event cloudevents.Event) error {
 	var (
 		subject        string
 		operator       IBMCloudFunctionsOperator
@@ -45,7 +45,7 @@ func IBMCloudFunctionsInvoke(context *Context, event cloudevents.Event) {
 		CookieJar = cookieJar
 	}
 
-	taskData = context.ParsedData.(*DAGTaskData)
+	taskData = context.ActionParsedData.(*DAGTaskData)
 	subject = taskData.Subject
 
 	err := json.Unmarshal(taskData.Operator, &operator)
@@ -153,16 +153,18 @@ func IBMCloudFunctionsInvoke(context *Context, event cloudevents.Event) {
 	if eventTypes, ok := (*context).TriggerEventMapping[subject]; ok {
 		for eventType, downstreamTaskTriggerIDs := range eventTypes {
 			if eventType == "event.triggerflow.termination.success" {
-				for _, downstreamTaskTriggerID := range downstreamTaskTriggerIDs {
-					downstreamTaskTrigger := (*context).Triggers[downstreamTaskTriggerID]
+				for _, downstreamTaskTrigger := range downstreamTaskTriggerIDs {
 					(*downstreamTaskTrigger).Lock.Lock()
-					downstreamTaskTriggerData := (*downstreamTaskTrigger).Context.ParsedData.(*DAGTaskData)
+					downstreamTaskTriggerData := (*downstreamTaskTrigger).Context.ConditionParsedData.(*DAGTaskData)
 					dependency := (*downstreamTaskTriggerData).Dependencies[subject]
 					(*dependency).Join = int(activationsDone)
 					(*downstreamTaskTriggerData).Dependencies[subject] = dependency
+					(*downstreamTaskTrigger).Context.Modified = true
 					(*downstreamTaskTrigger).Lock.Unlock()
 				}
 			}
 		}
 	}
+
+	return nil
 }

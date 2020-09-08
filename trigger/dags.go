@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	cloudevents "github.com/cloudevents/sdk-go"
 	log "github.com/sirupsen/logrus"
+	"go.uber.org/atomic"
 )
 
 type DAGTaskDependency struct {
-	Counter int
+	Counter atomic.Uint32
 	Join    int
 }
 
@@ -18,7 +19,7 @@ type DAGTaskData struct {
 	TaskResult   map[string]interface{}
 }
 
-func DAGTaskDataParser(rawData json.RawMessage) interface{} {
+func DAGTaskDataParser(rawData []byte) interface{} {
 	dagTaskData := DAGTaskData{}
 	err := json.Unmarshal(rawData, &dagTaskData)
 	if err != nil {
@@ -27,24 +28,24 @@ func DAGTaskDataParser(rawData json.RawMessage) interface{} {
 	return &dagTaskData
 }
 
-func DAGDummyTaskAction(context *Context, event cloudevents.Event) {
-
+func DAGDummyTaskAction(context *Context, event cloudevents.Event) error {
+	return nil
 }
 
-func DAGTaskFailureHandlerAction(context *Context, event cloudevents.Event) {
-
+func DAGTaskFailureHandlerAction(context *Context, event cloudevents.Event) error {
+	return nil
 }
 
-func DAGTaskRetryHandlerAction(context *Context, event cloudevents.Event) {
-
+func DAGTaskRetryHandlerAction(context *Context, event cloudevents.Event) error {
+	return nil
 }
 
-func DAGTaskJoinCondition(context *Context, event cloudevents.Event) bool {
-	contextData := (*context).ParsedData.(*DAGTaskData)
+func DAGTaskJoinCondition(context *Context, event cloudevents.Event) (bool, error) {
+	contextData := (*context).ConditionParsedData.(*DAGTaskData)
 
 	// Increment counter for dependency of received task termination event
 	if dependency, ok := (*contextData).Dependencies[event.Subject()]; ok {
-		(*dependency).Counter++
+		(*dependency).Counter.Add(1)
 	} else {
 		log.Errorf("[%s] Subject %s not found in dependencies", context.TriggerID, event.Subject())
 	}
@@ -56,7 +57,7 @@ func DAGTaskJoinCondition(context *Context, event cloudevents.Event) bool {
 		if dependency.Join == -1 {
 			joined = false  // If join == -1, the dependency for this upstream task hasn't been set yet
 		} else {
-			joined = dependency.Counter >= dependency.Join
+			joined = int(dependency.Counter.Load()) >= dependency.Join
 		}
 
 		if !joined {
@@ -90,5 +91,5 @@ func DAGTaskJoinCondition(context *Context, event cloudevents.Event) bool {
 	//	}
 	//}
 
-	return joined
+	return joined, nil
 }

@@ -56,10 +56,9 @@ func (rs RedisTriggerStorage) Get(workspace string, key string) map[string]strin
 
 func (rs RedisTriggerStorage) Put(workspace string, key string, field string, value []byte) {
 	boolCmd := rs.client.HSet(workspace + "-" + key, field, value)
-	result, err := boolCmd.Result()
-	if result {
-		log.Infof("[RedisTriggerStorage] Updated %s/%s", field, key)
-	} else {
-		log.Errorf("[RedisTriggerStorage] Error updating %s/%s: %s", field, key, err)
+	_, err := boolCmd.Result()
+	if err != nil {
+		panic(err)
 	}
+	log.Infof("[RedisTriggerStorage] Updated %s/%s", key, field)
 }
