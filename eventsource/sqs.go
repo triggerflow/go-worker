@@ -99,7 +99,7 @@ func (sqsEs *SQSEventSource) StartConsuming() {
 				rawBody := []byte(*message.Body)
 
 				if fastjson.GetString(rawBody, "specversion") == "" {
-					log.Infof("[SQSEventSource] Received lambda destination event, cast to cloudevent")
+					log.Debugf("[SQSEventSource] Received lambda destination event, cast to cloudevent")
 					parsed, err := p.ParseBytes(rawBody)
 					if err != nil {
 						panic(err)

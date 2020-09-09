@@ -207,7 +207,7 @@ func AWSStepFunctionsTask(context *Context, event cloudevents.Event) error {
 	}
 
 	if *invokeResult.StatusCode >= 200 && *invokeResult.StatusCode < 204 {
-		log.Infof("Invoked %s lambda -- %f s", parsedData.State.Resource, t1-t0)
+		log.Debugf("Invoked %s lambda -- %f s", parsedData.State.Resource, t1-t0)
 	} else {
 		return errors.New("oh no :(")
 	}
