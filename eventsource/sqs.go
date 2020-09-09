@@ -137,29 +137,58 @@ func (sqsEs *SQSEventSource) CommitEvents(subject string) {
 		return
 	}
 	records := value.([]string)
-	entries := make([]*sqs.DeleteMessageBatchRequestEntry, len(records))
 
-	for i, record := range records {
-		value, ok := sqsEs.consumed.Load(record)
-		if ok {
-			receiptHandle = value.(*string)
+	recordsLen := len(records) / 10
+
+	for i := 0; i < recordsLen; i++ {
+		entries := make([]*sqs.DeleteMessageBatchRequestEntry, 10)
+		for j := 0; j < 10; j++ {
+			record := records[(10*i)+j]
+			value, ok := sqsEs.consumed.Load(record)
+			if ok {
+				receiptHandle = value.(*string)
+			}
+			entries[j] = &sqs.DeleteMessageBatchRequestEntry{
+				ReceiptHandle: receiptHandle,
+				Id:            aws.String(record),
+			}
+			sqsEs.consumed.Delete(record)
 		}
-		entries[i] = &sqs.DeleteMessageBatchRequestEntry{
-			ReceiptHandle: receiptHandle,
-			Id: aws.String(record),
+		log.Debugf("[SQSEventSource] Going to commit %d events (subject %s)", len(entries), subject)
+		delMsgRequest := sqs.DeleteMessageBatchInput{
+			Entries:  entries,
+			QueueUrl: &sqsEs.queueUrl,
 		}
-		sqsEs.consumed.Delete(record)
+		_, err := sqsEs.sqsService.DeleteMessageBatch(&delMsgRequest)
+		if err != nil {
+			panic(err)
+		}
 	}
 
-	delMsgRequest := sqs.DeleteMessageBatchInput{
-		Entries:  entries,
-		QueueUrl: &sqsEs.queueUrl,
-	}
-
-	log.Debugf("[SQSEventSource] Going to commit %d events (subject %s)", len(entries), subject)
-	_, err := sqsEs.sqsService.DeleteMessageBatch(&delMsgRequest)
-	if err != nil {
-		panic(err)
+	recordsMod := len(records) % 10
+	if recordsMod != 0 {
+		entries := make([]*sqs.DeleteMessageBatchRequestEntry, recordsMod)
+		for j := 0; j < recordsMod; j++ {
+			record := records[(10*recordsLen)+j]
+			value, ok := sqsEs.consumed.Load(record)
+			if ok {
+				receiptHandle = value.(*string)
+			}
+			entries[j] = &sqs.DeleteMessageBatchRequestEntry{
+				ReceiptHandle: receiptHandle,
+				Id:            aws.String(record),
+			}
+			sqsEs.consumed.Delete(record)
+		}
+		log.Debugf("[SQSEventSource] Going to commit %d events (subject %s)", len(entries), subject)
+		delMsgRequest := sqs.DeleteMessageBatchInput{
+			Entries:  entries,
+			QueueUrl: &sqsEs.queueUrl,
+		}
+		_, err := sqsEs.sqsService.DeleteMessageBatch(&delMsgRequest)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	sqsEs.records.Delete(subject)

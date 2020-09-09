@@ -42,6 +42,7 @@ type MapState struct {
 	State struct {
 		TaskType  string `json:"Type"`
 		ItemsPath string `json:"ItemsPath"`
+		InputPath string `json:"InputPath"`
 		Next      string `json:"Next"`
 		End       bool   `json:"End"`
 	}
@@ -235,7 +236,11 @@ func AWSStepFunctionsMap(context *Context, event cloudevents.Event) error {
 		items, err = jsonpath.Read(eventData, parsedData.State.ItemsPath)
 		if err != nil {
 			return err
-
+		}
+	} else if parsedData.State.InputPath != "" {
+		items, err = jsonpath.Read(eventData, parsedData.State.InputPath)
+		if err != nil {
+			return err
 		}
 	} else {
 		items = eventData
