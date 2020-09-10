@@ -2,7 +2,6 @@ package eventsource
 
 import (
 	"encoding/json"
-	"fmt"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -11,7 +10,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/valyala/fastjson"
 	"sync"
-	"time"
 )
 
 type SQSEventSource struct {
@@ -82,7 +80,7 @@ func (sqsEs *SQSEventSource) StartConsuming() {
 		}
 
 		if first {
-			fmt.Println(time.Now().UTC().UnixNano())
+			//fmt.Println(time.Now().UTC().UnixNano())
 			first = false
 		}
 
