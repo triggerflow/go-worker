@@ -15,7 +15,7 @@ func main() {
 	config.UpdateParameters()
 
 	// Load triggerflow config map
-	yamlFile, err := ioutil.ReadFile(config.ConfigMapFilename)
+	yamlFile, err := ioutil.ReadFile(config.MapFilename)
 	if err != nil {
 		panic(err)
 	}

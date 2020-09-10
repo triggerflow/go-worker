@@ -8,9 +8,9 @@ import (
 
 var (
 	SinkMaxSize        = 200000
-	ConfigMapFilename  = "config_map.yaml"
+	MapFilename        = "config_map.yaml"
 	BootstrapWorkspace = ""
-	ControllerPort	   = 5000
+	ControllerPort     = 5000
 )
 
 func UpdateParameters() {
@@ -33,8 +33,8 @@ func UpdateParameters() {
 
 	param = os.Getenv("TRIGGERFLOW_CONFIG_MAP_FILE")
 	if param != "" {
-		ConfigMapFilename = param
-		log.Infof("Set parameter TRIGGERFLOW_CONFIG_MAP_FILE to %s", ConfigMapFilename)
+		MapFilename = param
+		log.Infof("Set parameter TRIGGERFLOW_CONFIG_MAP_FILE to %s", MapFilename)
 	}
 
 	param = os.Getenv("TRIGGERFLOW_BOOTSTRAP_WORKSPACE")
@@ -55,7 +55,7 @@ func UpdateParameters() {
 	}
 
 	log.Debugf("TRIGGERFLOW_SINK_MAX_SIZE=%d", SinkMaxSize)
-	log.Debugf("TRIGGERFLOW_CONFIG_MAP_FILE=%s", ConfigMapFilename)
+	log.Debugf("TRIGGERFLOW_CONFIG_MAP_FILE=%s", MapFilename)
 	log.Debugf("TRIGGERFLOW_BOOTSTRAP_WORKSPACE=%s", BootstrapWorkspace)
 	log.Debugf("TRIGGERFLOW_CONTROLLER_PORT=%d", ControllerPort)
 }
