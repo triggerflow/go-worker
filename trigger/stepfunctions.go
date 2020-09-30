@@ -15,136 +15,54 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/yalp/jsonpath"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 )
 
-type BaseState struct {
-	Subject string `json:"Subject"`
-}
-
-type PassState struct {
-	BaseState
-}
-
-type TaskState struct {
-	BaseState
-	State struct {
-		TaskType string `json:"Type"`
-		Resource string `json:"Resource"`
-		Next     string `json:"Next"`
-		End      bool   `json:"End"`
-	}
-}
-
-type MapState struct {
-	BaseState
-	State struct {
-		TaskType  string `json:"Type"`
-		ItemsPath string `json:"ItemsPath"`
-		InputPath string `json:"InputPath"`
-		Next      string `json:"Next"`
-		End       bool   `json:"End"`
-	}
-	JoinTriggerID string `json:"join_state_machine"`
-}
-
-type ChoiceState struct {
-	BaseState
-	State struct {
-		TaskType string                   `json:"Type"`
-		Next     string                   `json:"Next"`
-		End      bool                     `json:"End"`
+type State struct {
+	Subject  string `json:"Subject"`
+	AWSState struct {
+		TaskType   string                 `json:"Type"`
+		Resource   string                 `json:"Resource"`
+		Parameters map[string]interface{} `json:"Parameters"`
 		Choices  []map[string]interface{} `json:"Choices"`
-	}
-}
-
-type JoinStateMachine struct {
-	BaseState
+		ItemsPath  string                 `json:"ItemsPath"`
+		InputPath  string                 `json:"InputPath"`
+		Next       string                 `json:"Next"`
+		End        bool                   `json:"End"`
+	} `json:"State"`
+	JoinTriggerID string `json:"join_state_machine"`
 	Counter uint32        `json:"counter"`
 	JoinMax uint32        `json:"join_multiple"`
 	Results []interface{} `json:"sm_results"`
 }
 
-type EndStateMachine struct {
-	BaseState
-}
-
 var awsSession *session.Session = nil
 var awsLambda *lambda.Lambda = nil
+var awsSessionLock *sync.Mutex = &sync.Mutex{}
 
-func ASFPassStateDataParser(rawData []byte) (interface{}, error) {
-	state := PassState{}
-	err := json.Unmarshal(rawData, &state)
-	if err != nil {
-		return nil, err
-	} else {
-		return &state, nil
-	}
-}
-
-func ASFTaskStateDataParser(rawData []byte) (interface{}, error) {
-	state := TaskState{}
-	err := json.Unmarshal(rawData, &state)
-	if err != nil {
-		return nil, err
-	} else {
-		return &state, nil
-	}
-}
-
-func ASFConditionDataParser(rawData []byte) (interface{}, error) {
-	state := ChoiceState{}
-	err := json.Unmarshal(rawData, &state)
-	if err != nil {
-		return nil, err
-	} else {
-		return &state, nil
-	}
-}
-
-func ASFMapStateDataParser(rawData []byte) (interface{}, error) {
-	state := MapState{}
-	err := json.Unmarshal(rawData, &state)
-	if err != nil {
-		return nil, err
-	} else {
-		return &state, nil
-	}
-}
-
-func ASFEndStateMachineDataParser(rawData []byte) (interface{}, error) {
-	state := EndStateMachine{}
-	err := json.Unmarshal(rawData, &state)
-	if err != nil {
-		return nil, err
-	} else {
-		return &state, nil
-	}
-}
-
-func ASFJoinStateMachineDataParser(rawData []byte) (interface{}, error) {
-	state := JoinStateMachine{}
+func ASFStateParser(rawData []byte) (interface{}, error) {
+	state := State{}
 	err := json.Unmarshal(rawData, &state)
 	if err != nil {
 		return nil, err
 	}
-	if state.JoinMax > 0 {
+	if state.JoinMax > 0 && state.Results == nil {
 		state.Results = make([]interface{}, state.JoinMax)
 	}
 	return &state, nil
 }
 
 func AWSStepFunctionsPass(context *Context, event cloudevents.Event) error {
-	parsedData := context.ActionParsedData.(*PassState)
-
+	parsedData := context.ActionParsedData.(*State)
 
 	termEvent, err := createTerminationCloudevent(parsedData.Subject, "lambda.success")
 	if err != nil {
 		return err
 	}
 
-	joinTrg, ok := context.ConditionParsedData.(*JoinStateMachine)
+	joinTrg, ok := context.ConditionParsedData.(*State)
 	if ok {
 		_ = termEvent.SetData(joinTrg.Results)
 	}
@@ -157,23 +75,18 @@ func AWSStepFunctionsPass(context *Context, event cloudevents.Event) error {
 func AWSStepFunctionsTask(context *Context, event cloudevents.Event) error {
 	var err error
 
-	parsedData := context.ActionParsedData.(*TaskState)
+	parsedData := context.ActionParsedData.(*State)
 
+	awsSessionLock.Lock()
 	if awsSession == nil {
-		awsCredentials := struct {
-			AccessKeyID     string `json:"access_key_id"`
-			SecretAccessKey string `json:"secret_access_key"`
-			Region          string `json:"region"`
-		}{}
-
-		err = json.Unmarshal([]byte(context.GlobalContext["aws_credentials"]), &awsCredentials)
-		if err != nil {
-			return err
-		}
+		awsCredentials := context.GlobalContext["aws_credentials"]
 
 		awsSession, err = session.NewSession(&aws.Config{
-			Credentials: credentials.NewStaticCredentials(awsCredentials.AccessKeyID, awsCredentials.SecretAccessKey, ""),
-			Region:      &awsCredentials.Region,
+			Credentials: credentials.NewStaticCredentials(
+				awsCredentials["access_key_id"].(string),
+				awsCredentials["secret_access_key"].(string),
+				""),
+			Region: aws.String(awsCredentials["region"].(string)),
 		})
 		if err != nil {
 			return err
@@ -181,19 +94,30 @@ func AWSStepFunctionsTask(context *Context, event cloudevents.Event) error {
 
 		awsLambda = lambda.New(awsSession)
 	}
+	awsSessionLock.Unlock()
 
 	lambdaContext := struct {
-		Subject    string `json:"__TRIGGERFLOW_SUBJECT"`
-		LambdaArgs []byte `json:"__EVENT_DATA"`
+		Subject     string                 `json:"__TRIGGERFLOW_SUBJECT"`
+		LambdaArgs  interface{}            `json:"__EVENT_DATA"`
+		EventSource map[string]interface{} `json:"__TRIGGERFLOW_EVENT_SOURCE"`
 	}{
-		Subject:    parsedData.Subject,
-		LambdaArgs: event.Data.([]byte),
+		Subject: parsedData.Subject,
 	}
 
-	payload, err := json.Marshal(lambdaContext)
+	if parsedData.AWSState.Parameters != nil {
+		lambdaContext.LambdaArgs = parsedData.AWSState.Parameters
+	} else {
+		lambdaContext.LambdaArgs = event.Data
+	}
+
+	if eventSource, ok := context.GlobalContext["event_source"]; ok {
+		lambdaContext.EventSource = eventSource
+	}
+
+	payload, err := jsoniter.Marshal(lambdaContext)
 
 	invokeArgs := lambda.InvokeInput{
-		FunctionName:   &parsedData.State.Resource,
+		FunctionName:   &parsedData.AWSState.Resource,
 		InvocationType: aws.String(lambda.InvocationTypeEvent),
 		Payload:        payload,
 	}
@@ -207,9 +131,9 @@ func AWSStepFunctionsTask(context *Context, event cloudevents.Event) error {
 	}
 
 	if *invokeResult.StatusCode >= 200 && *invokeResult.StatusCode < 204 {
-		log.Debugf("Invoked %s lambda -- %f s", parsedData.State.Resource, t1-t0)
+		log.Debugf("Invoked %s lambda -- %f s", parsedData.AWSState.Resource, t1-t0)
 	} else {
-		return errors.New("oh no :(")
+		return errors.New(fmt.Sprintf("invocation failed: %d", *invokeResult.StatusCode))
 	}
 
 	return nil
@@ -221,7 +145,7 @@ func AWSStepFunctionsMap(context *Context, event cloudevents.Event) error {
 		items     interface{}
 	)
 
-	parsedData := context.ActionParsedData.(*MapState)
+	parsedData := context.ActionParsedData.(*State)
 
 	rawEventData, ok := bytes.Unquote(event.Data.([]byte))
 	if !ok {
@@ -232,13 +156,13 @@ func AWSStepFunctionsMap(context *Context, event cloudevents.Event) error {
 		return err
 	}
 
-	if parsedData.State.ItemsPath != "" {
-		items, err = jsonpath.Read(eventData, parsedData.State.ItemsPath)
+	if parsedData.AWSState.ItemsPath != "" {
+		items, err = jsonpath.Read(eventData, parsedData.AWSState.ItemsPath)
 		if err != nil {
 			return err
 		}
-	} else if parsedData.State.InputPath != "" {
-		items, err = jsonpath.Read(eventData, parsedData.State.InputPath)
+	} else if parsedData.AWSState.InputPath != "" {
+		items, err = jsonpath.Read(eventData, parsedData.AWSState.InputPath)
 		if err != nil {
 			return err
 		}
@@ -252,9 +176,9 @@ func AWSStepFunctionsMap(context *Context, event cloudevents.Event) error {
 	}
 
 	joinTrigger := context.Triggers[parsedData.JoinTriggerID]
-	joinContext := joinTrigger.Context.ConditionParsedData.(*JoinStateMachine)
+	joinContext := joinTrigger.Context.ConditionParsedData.(*State)
 	joinContext.JoinMax = uint32(len(itemsList))
-	joinContext.Results = make([]interface{}, len(itemsList))
+	//joinContext.Results = make([]interface{}, len(itemsList))
 
 	for _, elem := range itemsList {
 		termEvent, err := createTerminationCloudevent(parsedData.Subject, "lambda.success")
@@ -262,11 +186,17 @@ func AWSStepFunctionsMap(context *Context, event cloudevents.Event) error {
 			return err
 		}
 
-		err = termEvent.SetData(elem)
+		JSONElem, ok := elem.(map[string]interface{})
+		if ok {
+			termEvent.SetDataContentType(cloudevents.ApplicationJSON)
+			termEvent.Data = JSONElem
+		} else {
+			termEvent.SetDataContentType(cloudevents.Base64)
+			err = termEvent.SetData(elem)
+		}
 		if err != nil {
 			return err
 		}
-		termEvent.SetDataContentType("text/plain")
 
 		context.EventSink <- termEvent
 	}
@@ -275,13 +205,13 @@ func AWSStepFunctionsMap(context *Context, event cloudevents.Event) error {
 }
 
 func AWSStepFunctionsEndStateMachine(context *Context, event cloudevents.Event) error {
-	parsedData := context.ActionParsedData.(*EndStateMachine)
+	parsedData := context.ActionParsedData.(*State)
 	termEvent, err := createTerminationCloudevent(parsedData.Subject, "lambda.success")
 	if err != nil {
 		return err
 	}
 
-	joinTrg, ok := context.ConditionParsedData.(*JoinStateMachine)
+	joinTrg, ok := context.ConditionParsedData.(*State)
 	if ok {
 		_ = termEvent.SetData(joinTrg.Results)
 	}
@@ -291,10 +221,10 @@ func AWSStepFunctionsEndStateMachine(context *Context, event cloudevents.Event) 
 }
 
 func AWSStepFunctionsCondition(context *Context, event cloudevents.Event) (bool, error) {
-	parsedData := context.ConditionParsedData.(*ChoiceState)
+	parsedData := context.ConditionParsedData.(*State)
 	condition := true
 
-	if parsedData.State.Choices != nil {
+	if parsedData.AWSState.Choices != nil {
 		// TODO implement choice state logic
 	}
 
@@ -302,11 +232,12 @@ func AWSStepFunctionsCondition(context *Context, event cloudevents.Event) (bool,
 }
 
 func AWSStepFunctionsJoinStateMachine(context *Context, event cloudevents.Event) (bool, error) {
-	parsedData := context.ConditionParsedData.(*JoinStateMachine)
+	parsedData := context.ConditionParsedData.(*State)
 
 	if parsedData.JoinMax > 0 {
 		cnt := atomic.AddUint32(&parsedData.Counter, 1)
-		parsedData.Results[cnt-1] = event.Data
+		//parsedData.Results[cnt-1] = event.Data
+		log.Debugf("Join %v / %v", cnt, parsedData.JoinMax)
 		return cnt >= parsedData.JoinMax, nil
 	}
 
