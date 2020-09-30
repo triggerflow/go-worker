@@ -17,7 +17,7 @@ type Workspace struct {
 	WorkspaceName       string
 	Triggers            trigger.Map
 	TriggerEventMapping trigger.ActivationEventMap
-	GlobalContext       map[string]string
+	GlobalContext       map[string]map[string]interface{}
 	TriggerStorage      tirggerstorage.Storage
 	EventSources        map[string]eventsource.EventSource
 	EventSink           chan *cloudevents.Event
@@ -30,6 +30,7 @@ func ProcessWorkspace(workspaceName string) {
 		TriggerEventMapping: make(trigger.ActivationEventMap),
 		EventSources:        make(map[string]eventsource.EventSource),
 		EventSink:           make(chan *cloudevents.Event, config.SinkMaxSize),
+		GlobalContext:       make(map[string]map[string]interface{}),
 	}
 
 	workspace.startTriggerStorage()
@@ -39,7 +40,15 @@ func ProcessWorkspace(workspaceName string) {
 		panic(errors.New(fmt.Sprintf("Workspace %s is not defined", workspaceName)))
 	}
 
-	workspace.GlobalContext = workspace.TriggerStorage.Get(workspaceName, "global_context")
+	globalContext := workspace.TriggerStorage.Get(workspaceName, "global_context")
+	for key, value := range globalContext {
+		parsedValue := make(map[string]interface{})
+		err := json.Unmarshal([]byte(value), &parsedValue)
+		if err != nil {
+			panic(err)
+		}
+		workspace.GlobalContext[key] = parsedValue
+	}
 
 	workspace.startEventSources()
 	workspace.updateTriggers()
@@ -212,6 +221,5 @@ func (workspace *Workspace) checkpointTriggers(subject string, numTriggers int, 
 			}
 		}
 	}
-
 
 }

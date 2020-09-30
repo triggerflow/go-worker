@@ -35,7 +35,7 @@ type Context struct {
 	EventSink           chan *cloudevents.Event
 	Triggers            Map
 	TriggerEventMapping ActivationEventMap
-	GlobalContext		map[string]string
+	GlobalContext		map[string]map[string]interface{}
 	RawData             json.RawMessage
 	ConditionParsedData interface{}
 	ActionParsedData    interface{}
