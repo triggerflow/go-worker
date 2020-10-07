@@ -4,28 +4,28 @@ import (
 	"encoding/json"
 	cloudevents "github.com/cloudevents/sdk-go"
 	log "github.com/sirupsen/logrus"
-	"go.uber.org/atomic"
+	"sync/atomic"
 )
 
 type DAGTaskDependency struct {
-	Counter atomic.Uint32
-	Join    int
+	Counter uint32 `json:"counter"`
+	Join    int32 `json:"join"`
 }
 
 type DAGTaskData struct {
-	Subject      string
-	Operator     json.RawMessage
-	Dependencies map[string]*DAGTaskDependency
-	TaskResult   map[string]interface{}
+	Subject      string                        `json:"subject"`
+	Dependencies map[string]*DAGTaskDependency `json:"dependencies"`
+	Operator     json.RawMessage               `json:"operator"`
+	TaskResult   []interface{}                 `json:"result"`
 }
 
-func DAGTaskDataParser(rawData []byte) interface{} {
+func DAGTaskDataParser(rawData []byte) (interface{}, error) {
 	dagTaskData := DAGTaskData{}
 	err := json.Unmarshal(rawData, &dagTaskData)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return &dagTaskData
+	return &dagTaskData, nil
 }
 
 func DAGDummyTaskAction(context *Context, event cloudevents.Event) error {
@@ -45,7 +45,7 @@ func DAGTaskJoinCondition(context *Context, event cloudevents.Event) (bool, erro
 
 	// Increment counter for dependency of received task termination event
 	if dependency, ok := (*contextData).Dependencies[event.Subject()]; ok {
-		(*dependency).Counter.Add(1)
+		atomic.AddUint32(&(*dependency).Counter, 1)
 	} else {
 		log.Errorf("[%s] Subject %s not found in dependencies", context.TriggerID, event.Subject())
 	}
@@ -55,9 +55,9 @@ func DAGTaskJoinCondition(context *Context, event cloudevents.Event) (bool, erro
 	joined := true
 	for _, dependency := range (*contextData).Dependencies {
 		if dependency.Join == -1 {
-			joined = false  // If join == -1, the dependency for this upstream task hasn't been set yet
+			joined = false // If join == -1, the dependency for this upstream task hasn't been set yet
 		} else {
-			joined = int(dependency.Counter.Load()) >= dependency.Join
+			joined = atomic.LoadUint32(&(*dependency).Counter) == uint32(dependency.Join)
 		}
 
 		if !joined {
@@ -66,30 +66,6 @@ func DAGTaskJoinCondition(context *Context, event cloudevents.Event) (bool, erro
 	}
 
 	// TODO Store event result into context data
-	//if event.Data != nil && event.DataContentType() == "application/json" {
-	//	eventData := make(map[string]interface{})
-	//	eventDataRaw := event.Data.([]byte)
-	//	tmp, _ := strconv.Unquote(string(eventDataRaw))
-	//	err := json.Unmarshal([]byte(tmp), &eventData)
-	//	if err != nil {
-	//		panic(err)
-	//		//log.Warnf("[DAGTaskJoinCondition] Could not decode event application/json data from %s", event.Subject())
-	//	} else {
-	//		if result, ok := context.Data["result"]; ok {
-	//			switch result.(type) {
-	//			case []interface{}: // Append result to result list
-	//				context.Data["result"] = append(result.([]interface{}), event.Data)
-	//			case interface{}: // Multiple results: store them in a slice
-	//				resultList := make([]interface{}, 0)
-	//				resultList = append(resultList, result)
-	//				resultList = append(resultList, event.Data)
-	//				context.Data["result"] = resultList
-	//			}
-	//		} else {
-	//			context.Data["result"] = event.Data
-	//		}
-	//	}
-	//}
 
 	return joined, nil
 }
