@@ -118,11 +118,11 @@ func IBMCloudFunctionsInvoke(context *Context, event cloudevents.Event) error {
 					if err == nil {
 						activationID := fastjson.GetString(body, "activationId")
 						if activationID != "" {
-							log.Infof("[%s] IBM Cloud Functions invoke %i success -- activation ID: %s -- %f s", context.TriggerID, i, activationID, t1-t0)
+							log.Infof("[%s] IBM Cloud Functions invoke %v success -- activation ID: %s -- %f s", context.TriggerID, i, activationID, t1-t0)
 							atomic.AddUint32(&activationsDone, 1)
 							done = true
 						} else {
-							log.Warnf("[%s] IBM Cloud Function invoke %i failure -- activation ID not in response", context.TriggerID, i)
+							log.Warnf("[%s] IBM Cloud Function invoke %v failure -- activation ID not in response", context.TriggerID, i)
 							ret++
 							time.Sleep(time.Millisecond * 15)
 						}
