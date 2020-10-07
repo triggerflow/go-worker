@@ -238,7 +238,7 @@ func AWSStepFunctionsJoinStateMachine(context *Context, event cloudevents.Event)
 		cnt := atomic.AddUint32(&parsedData.Counter, 1)
 		//parsedData.Results[cnt-1] = event.Data
 		log.Debugf("Join %v / %v", cnt, parsedData.JoinMax)
-		return cnt >= parsedData.JoinMax, nil
+		return cnt == parsedData.JoinMax, nil
 	}
 
 	return true, nil

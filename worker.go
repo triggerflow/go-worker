@@ -141,18 +141,22 @@ func (workspace *Workspace) contextualizeTrigger(trg *trigger.Trigger) {
 
 	conditionParser := (*trg).ConditionFunctionData["name"]
 	conditionFunctionParser := trigger.ContextParsers[conditionParser]
-	(*trg).Context.ConditionParsedData, err = conditionFunctionParser((*trg).Context.RawData)
+	if conditionFunctionParser != nil {
+		(*trg).Context.ConditionParsedData, err = conditionFunctionParser((*trg).Context.RawData)
 
-	if err != nil {
-		panic(err)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	actionParser := (*trg).ActionFunctionData["name"]
 	actionFunctionParser := trigger.ContextParsers[actionParser]
-	(*trg).Context.ActionParsedData, err = actionFunctionParser((*trg).Context.RawData)
+	if actionFunctionParser != nil {
+		(*trg).Context.ActionParsedData, err = actionFunctionParser((*trg).Context.RawData)
 
-	if err != nil {
-		panic(err)
+		if err != nil {
+			panic(err)
+		}
 	}
 }
 
