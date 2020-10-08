@@ -17,8 +17,10 @@ import (
 	"time"
 )
 
-var CookieJar *cookiejar.Jar
-var Retries = 5
+var (
+	cookieJar, _ = cookiejar.New(&cookiejar.Options{})
+	retries      = 5
+)
 
 type IBMCloudFunctionsOperator struct {
 	Url          string                   `json:"url"`
@@ -30,27 +32,21 @@ type IBMCloudFunctionsOperator struct {
 
 func IBMCloudFunctionsInvoke(context *Context, event cloudevents.Event) error {
 	var (
-		subject        string
-		operator       IBMCloudFunctionsOperator
-		taskData       *DAGTaskData
-		iterDataKwarg  string
-		iterDataValues []interface{}
+		subject         string
+		operator        IBMCloudFunctionsOperator
+		taskData        *DAGTaskData
+		iterDataKwarg   string
+		iterDataValues  []interface{}
+		wg              sync.WaitGroup
+		activationsDone uint32
 	)
-
-	if CookieJar == nil {
-		cookieJar, err := cookiejar.New(&cookiejar.Options{})
-		if err != nil {
-			panic(err)
-		}
-		CookieJar = cookieJar
-	}
 
 	taskData = context.ActionParsedData.(*DAGTaskData)
 	subject = taskData.Subject
 
-	err := json.Unmarshal(taskData.Operator, &operator)
+	err := jsoniter.Unmarshal(taskData.Operator, &operator)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	// Get iterdata kwarg and values
@@ -63,9 +59,6 @@ func IBMCloudFunctionsInvoke(context *Context, event cloudevents.Event) error {
 		iterDataKwarg = iterDataKwargs[0].String()
 		iterDataValues = operator.IterData[iterDataKwarg]
 	}
-
-	var wg sync.WaitGroup
-	var activationsDone uint32
 
 	for i, iterDataValue := range iterDataValues {
 		wg.Add(1)
@@ -98,7 +91,7 @@ func IBMCloudFunctionsInvoke(context *Context, event cloudevents.Event) error {
 			}
 
 			HTTPClient := &http.Client{
-				Jar: CookieJar,
+				Jar: cookieJar,
 			}
 
 			req, err := http.NewRequest("POST", operator.Url, bytes.NewBuffer(body))
@@ -115,7 +108,7 @@ func IBMCloudFunctionsInvoke(context *Context, event cloudevents.Event) error {
 			ret := 0
 
 			t0 := float64(time.Now().UTC().UnixNano()) / 1000000000.0
-			for !done && ret < Retries {
+			for !done && ret < retries {
 				res, err := HTTPClient.Do(req)
 				t1 := float64(time.Now().UTC().UnixNano()) / 1000000000.0
 
@@ -125,11 +118,11 @@ func IBMCloudFunctionsInvoke(context *Context, event cloudevents.Event) error {
 					if err == nil {
 						activationID := fastjson.GetString(body, "activationId")
 						if activationID != "" {
-							log.Infof("[%s] IBM Cloud Functions invoke %i success -- activation ID: %s -- %f s", context.TriggerID, i, activationID, t1-t0)
+							log.Infof("[%s] IBM Cloud Functions invoke %v success -- activation ID: %s -- %f s", context.TriggerID, i, activationID, t1-t0)
 							atomic.AddUint32(&activationsDone, 1)
 							done = true
 						} else {
-							log.Warnf("[%s] IBM Cloud Function invoke %i failure -- activation ID not in response", context.TriggerID, i)
+							log.Warnf("[%s] IBM Cloud Function invoke %v failure -- activation ID not in response", context.TriggerID, i)
 							ret++
 							time.Sleep(time.Millisecond * 15)
 						}
@@ -157,7 +150,7 @@ func IBMCloudFunctionsInvoke(context *Context, event cloudevents.Event) error {
 					(*downstreamTaskTrigger).Lock.Lock()
 					downstreamTaskTriggerData := (*downstreamTaskTrigger).Context.ConditionParsedData.(*DAGTaskData)
 					dependency := (*downstreamTaskTriggerData).Dependencies[subject]
-					(*dependency).Join = int(activationsDone)
+					(*dependency).Join = int32(activationsDone)
 					(*downstreamTaskTriggerData).Dependencies[subject] = dependency
 					(*downstreamTaskTrigger).Context.Modified = true
 					(*downstreamTaskTrigger).Lock.Unlock()

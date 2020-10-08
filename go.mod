@@ -19,7 +19,6 @@ require (
 	github.com/streadway/amqp v1.0.0
 	github.com/valyala/fastjson v1.5.1
 	github.com/yalp/jsonpath v0.0.0-20180802001716-5cc68e5049a0
-	go.uber.org/atomic v1.4.0
 	golang.org/x/crypto v0.0.0-20200206161412-a0c6ece9d31a // indirect
 	golang.org/x/sync v0.0.0-20190911185100-cd5d95a43a6e // indirect
 	golang.org/x/sys v0.0.0-20200202164722-d101bd2416d5 // indirect

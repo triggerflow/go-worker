@@ -40,14 +40,17 @@ func DecodeCloudEventBytes(rawCloudEvent []byte) (*cloudevents.Event, error) {
 	if dataContentType != "" {
 		if dataContentType == cloudevents.ApplicationJSON {
 			data := make(map[string]interface{})
-			err := jsoniter.Unmarshal(fastjson.GetBytes(rawCloudEvent, "data"), &data)
-			if err != nil {
-				return nil, err
-			} else {
-				cloudevent.SetDataContentType(dataContentType)
-				err = cloudevent.SetData(data)
+			dataBytes := fastjson.GetBytes(rawCloudEvent, "data")
+			if dataBytes != nil {
+				err := jsoniter.Unmarshal(dataBytes, &data)
 				if err != nil {
 					return nil, err
+				} else {
+					cloudevent.SetDataContentType(dataContentType)
+					err = cloudevent.SetData(data)
+					if err != nil {
+						return nil, err
+					}
 				}
 			}
 		} else {
