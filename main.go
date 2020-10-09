@@ -11,9 +11,7 @@ import (
 func main() {
 	configured := false
 
-	log.SetLevel(log.DebugLevel)
-
-	// Set up parameters
+	config.SetLogLevel()
 	config.UpdateParameters()
 
 	// Load triggerflow config map
@@ -30,6 +28,7 @@ func main() {
 		}
 	}
 
+	// If loading config from file failed, load config from env vars
 	if !configured {
 		log.Infof("Loading configuration from env vars")
 		err := config.LoadConfigFromEnv()

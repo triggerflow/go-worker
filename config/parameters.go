@@ -4,6 +4,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"os"
 	"strconv"
+	"strings"
 )
 
 var (
@@ -58,4 +59,27 @@ func UpdateParameters() {
 	log.Debugf("TRIGGERFLOW_CONFIG_MAP_FILE=%s", MapFilename)
 	log.Debugf("TRIGGERFLOW_BOOTSTRAP_WORKSPACE=%s", BootstrapWorkspace)
 	log.Debugf("TRIGGERFLOW_CONTROLLER_PORT=%d", ControllerPort)
+}
+
+func SetLogLevel() {
+	loglevel := os.Getenv("LOG_LEVEL")
+	loglevel = strings.ToUpper(loglevel)
+	switch loglevel {
+	case "TRACE":
+		log.SetLevel(log.TraceLevel)
+	case "DEBUG":
+		log.SetLevel(log.DebugLevel)
+	case "INFO":
+		log.SetLevel(log.InfoLevel)
+	case "WARNING":
+		log.SetLevel(log.WarnLevel)
+	case "ERROR":
+		log.SetLevel(log.ErrorLevel)
+	case "FATAL":
+		log.SetLevel(log.FatalLevel)
+	case "PANIC":
+		log.SetLevel(log.PanicLevel)
+	default:
+		log.SetLevel(log.PanicLevel)
+	}
 }
