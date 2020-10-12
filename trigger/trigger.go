@@ -6,6 +6,7 @@ import (
 	"fmt"
 	cloudevents "github.com/cloudevents/sdk-go"
 	"sync"
+	"triggerflow/config"
 	"triggerflow/eventsource"
 )
 
@@ -26,6 +27,7 @@ type Trigger struct {
 	Workspace             string
 	Timestamp             string
 	Lock                  sync.Mutex
+	EventChannel          chan *cloudevents.Event
 }
 
 type Context struct {
@@ -35,7 +37,7 @@ type Context struct {
 	EventSink           chan *cloudevents.Event
 	Triggers            Map
 	TriggerEventMapping ActivationEventMap
-	GlobalContext		map[string]map[string]interface{}
+	GlobalContext       map[string]map[string]interface{}
 	RawData             json.RawMessage
 	ConditionParsedData interface{}
 	ActionParsedData    interface{}
@@ -85,6 +87,7 @@ func UnmarshalJSONTrigger(triggerJSON []byte) (*Trigger, error) {
 	}
 
 	// Build Trigger struct from parsed JSON trigger
+	triggerEventChannel := make(chan *cloudevents.Event, config.SinkMaxSize)
 	trigger = &Trigger{
 		TriggerID:             rawJSONTrigger.ID,
 		UUID:                  rawJSONTrigger.UUID,
@@ -96,6 +99,7 @@ func UnmarshalJSONTrigger(triggerJSON []byte) (*Trigger, error) {
 		Transient:             rawJSONTrigger.Transient,
 		Timestamp:             rawJSONTrigger.Timestamp,
 		Lock:                  sync.Mutex{},
+		EventChannel:          triggerEventChannel,
 	}
 
 	if condition, ok := Conditions[rawJSONTrigger.Condition["name"]]; ok {
@@ -136,14 +140,14 @@ func MarshalJSONTrigger(trg *Trigger) ([]byte, error) {
 	}
 
 	JSONtrigger := struct {
-		ID               string `json:"id"`
-		UUID             string `json:"uuid"`
-		Workspace        string `json:"workspace"`
-		Transient        bool `json:"transient"`
-		Timestamp        string `json:"timestamp"`
-		ActivationEvents []cloudevents.Event `json:"activation_events"`
-		Condition        map[string]string `json:"condition"`
-		Action           map[string]string `json:"action"`
+		ID               string                 `json:"id"`
+		UUID             string                 `json:"uuid"`
+		Workspace        string                 `json:"workspace"`
+		Transient        bool                   `json:"transient"`
+		Timestamp        string                 `json:"timestamp"`
+		ActivationEvents []cloudevents.Event    `json:"activation_events"`
+		Condition        map[string]string      `json:"condition"`
+		Action           map[string]string      `json:"action"`
 		Context          map[string]interface{} `json:"context"`
 	}{
 		ID:               trg.TriggerID,

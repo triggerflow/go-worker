@@ -2,10 +2,12 @@ package eventsource
 
 import (
 	"encoding/json"
+	"fmt"
 	cloudevents "github.com/cloudevents/sdk-go"
 	log "github.com/sirupsen/logrus"
 	rabbit "github.com/streadway/amqp"
 	"sync"
+	"time"
 )
 
 type RabbitMQEventSource struct {
@@ -83,7 +85,12 @@ func (rabbitEs *RabbitMQEventSource) StartConsuming() {
 
 	log.Infof("[RabbitMQEventSource] Consuming from queue %s", rabbitEs.rabbitQueue.Name)
 
+	first := true
 	for d := range msgs {
+		if first {
+			fmt.Println(time.Now().UTC().UnixNano())
+			first = false
+		}
 		go func(message rabbit.Delivery) {
 			cloudevent, err := DecodeCloudEventBytes(message.Body)
 			if err != nil {

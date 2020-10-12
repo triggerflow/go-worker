@@ -3,10 +3,12 @@ package eventsource
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	cloudevents "github.com/cloudevents/sdk-go"
 	"github.com/segmentio/kafka-go"
 	log "github.com/sirupsen/logrus"
 	"sync"
+	"time"
 )
 
 type KafkaEventSource struct {
@@ -71,10 +73,16 @@ func CreateKafkaEventSourceMappedConfig(workspace string, eventSink chan *cloude
 }
 
 func (kafkaEs *KafkaEventSource) StartConsuming() {
+	first := true
 	for {
 		m, err := kafkaEs.kafkaReader.FetchMessage(context.Background())
 		if err != nil {
 			panic(err)
+		}
+
+		if first {
+			fmt.Println(time.Now().UTC().UnixNano())
+			first = false
 		}
 
 		go func(message kafka.Message) {

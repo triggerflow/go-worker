@@ -87,7 +87,12 @@ func (redisEs *RedisEventSource) StartConsuming() {
 		lastID = values[len(values)-1].ID
 		//log.Debugf("[RedisEventSource] Pulled %d events", len(values))
 
+		first := true
 		for _, value := range values {
+			if first {
+				fmt.Println(time.Now().UTC().UnixNano())
+				first = false
+			}
 			go func(rawEvent map[string]interface{}, ID string) {
 				cloudevent := cloudevents.NewEvent()
 				cloudevent.SetSpecVersion(rawEvent["specversion"].(string))
