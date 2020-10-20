@@ -2,14 +2,12 @@ package eventsource
 
 import (
 	"encoding/json"
-	"fmt"
 	cloudevents "github.com/cloudevents/sdk-go"
 	"github.com/go-redis/redis"
 	log "github.com/sirupsen/logrus"
 	"github.com/valyala/fastjson"
 	"strconv"
 	"sync"
-	"time"
 )
 
 type RedisEventSource struct {
@@ -79,21 +77,11 @@ func (redisEs *RedisEventSource) StartConsuming() {
 			panic(err)
 		}
 
-		if lastID == "0" {
-			fmt.Println(time.Now().UTC().UnixNano())
-		}
-
 		values := events[0].Messages
 		lastID = values[len(values)-1].ID
 		log.Debugf("[RedisEventSource] Pulled %d events", len(values))
 
-		first := true
 		for _, value := range values {
-			if first {
-				fmt.Println(time.Now().UTC().UnixNano())
-				first = false
-			}
-
 			go func(rawEvent map[string]interface{}, ID string) {
 				cloudevent := cloudevents.NewEvent()
 				cloudevent.SetSpecVersion(rawEvent["specversion"].(string))

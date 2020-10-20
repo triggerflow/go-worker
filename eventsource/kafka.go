@@ -3,12 +3,10 @@ package eventsource
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	cloudevents "github.com/cloudevents/sdk-go"
 	"github.com/segmentio/kafka-go"
 	log "github.com/sirupsen/logrus"
 	"sync"
-	"time"
 	"triggerflow/config"
 )
 
@@ -82,16 +80,10 @@ func (kafkaEs *KafkaEventSource) StartConsuming() {
 		}
 	}(recordsChan)
 
-	first := true
 	for {
 		m, err := kafkaEs.kafkaReader.FetchMessage(context.Background())
 		if err != nil {
 			panic(err)
-		}
-
-		if first {
-			fmt.Println(time.Now().UTC().UnixNano())
-			first = false
 		}
 
 		cloudevent, err := DecodeCloudEventBytes(m.Value)
