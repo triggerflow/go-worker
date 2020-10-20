@@ -2,14 +2,12 @@ package eventsource
 
 import (
 	"encoding/json"
-	"fmt"
 	cloudevents "github.com/cloudevents/sdk-go"
 	"github.com/go-redis/redis"
 	log "github.com/sirupsen/logrus"
 	"github.com/valyala/fastjson"
 	"strconv"
 	"sync"
-	"time"
 )
 
 type RedisEventSource struct {
@@ -79,13 +77,9 @@ func (redisEs *RedisEventSource) StartConsuming() {
 			panic(err)
 		}
 
-		if lastID == "0" {
-			fmt.Println(time.Now().UTC().UnixNano())
-		}
-
 		values := events[0].Messages
 		lastID = values[len(values)-1].ID
-		//log.Debugf("[RedisEventSource] Pulled %d events", len(values))
+		log.Debugf("[RedisEventSource] Pulled %d events", len(values))
 
 		for _, value := range values {
 			go func(rawEvent map[string]interface{}, ID string) {
@@ -104,17 +98,17 @@ func (redisEs *RedisEventSource) StartConsuming() {
 					}
 				}
 
-				//redisEs.recordsLock.Lock()
 				redisEs.eventSink <- &cloudevent
-				//redisEs.records = append(redisEs.records, ID)
-				//redisEs.recordsLock.Unlock()
+				redisEs.recordsLock.Lock()
+				redisEs.records = append(redisEs.records, ID)
+				redisEs.recordsLock.Unlock()
 
 			}(value.Values, value.ID)
 		}
 	}
 }
 
-func (redisEs *RedisEventSource) CommitEvents(subject string) {
+func (redisEs *RedisEventSource) CommitEvents() {
 	log.Infof("[RedisEventSource] Going to commit %d events", len(redisEs.records))
 	redisEs.client.XDel(redisEs.stream, redisEs.records...)
 	redisEs.records = make([]string, 0)

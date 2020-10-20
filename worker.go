@@ -21,6 +21,7 @@ type Workspace struct {
 	TriggerStorage      tirggerstorage.Storage
 	EventSources        map[string]eventsource.EventSource
 	EventSink           chan *cloudevents.Event
+	CheckpointChannel   chan *trigger.Trigger
 }
 
 func ProcessWorkspace(workspaceName string) {
@@ -31,6 +32,7 @@ func ProcessWorkspace(workspaceName string) {
 		EventSources:        make(map[string]eventsource.EventSource),
 		EventSink:           make(chan *cloudevents.Event, config.SinkMaxSize),
 		GlobalContext:       make(map[string]map[string]interface{}),
+		CheckpointChannel:   make(chan *trigger.Trigger),
 	}
 
 	workspace.startTriggerStorage()
@@ -53,16 +55,15 @@ func ProcessWorkspace(workspaceName string) {
 	workspace.startEventSources()
 	workspace.updateTriggers()
 
+	for _, trg := range workspace.Triggers {
+		go workspace.processTrigger(trg)
+	}
+
 	for event := range workspace.EventSink {
 		if matchingTriggers, ok := workspace.TriggerEventMapping[event.Subject()][event.Type()]; ok {
-			matchNum := len(workspace.TriggerEventMapping[event.Subject()][event.Type()])
-			resultChan := make(chan bool, matchNum)
 			for _, trg := range matchingTriggers {
-				go workspace.processTrigger(trg, *event, resultChan)
-				//workspace.processTrigger(trg, *event, resultChan)
+				trg.EventChannel <- event
 			}
-			//workspace.checkpointTriggers(event.Subject(), matchNum, resultChan)
-			go workspace.checkpointTriggers(event.Subject(), matchNum, resultChan)
 		} else {
 			log.Infof("Received event with subject <%s> and type <%s> not found in local trigger cache", event.Subject(), event.Type())
 			workspace.updateTriggers()
@@ -71,27 +72,27 @@ func ProcessWorkspace(workspaceName string) {
 	}
 }
 
-func (workspace *Workspace) processTrigger(trg *trigger.Trigger, event cloudevents.Event, resultChan chan bool) {
-	log.Debugf("Processing trigger <%s>", trg.TriggerID)
+func (workspace *Workspace) processTrigger(trg *trigger.Trigger) {
+	for event := range trg.EventChannel {
+		log.Debugf("Processing trigger <%s>", trg.TriggerID)
+		condition, err := trg.Condition(trg.Context, *event)
 
-	trg.Context.Modified = true
-	condition, err := trg.Condition(trg.Context, event)
-
-	if err != nil {
-		log.Errorf("Error while processing <%s> condition: %s", trg.TriggerID, err)
-		return
-	}
-
-	if condition {
-		err = trg.Action(trg.Context, event)
 		if err != nil {
-			log.Errorf("Error while processing <%s> action: %s", trg.TriggerID, err)
-		} else {
+			log.Errorf("Error while processing <%s> condition: %s", trg.TriggerID, err)
+			return
+		}
+
+		if condition {
+			err = trg.Action(trg.Context, *event)
+			if err != nil {
+				log.Errorf("Error while processing <%s> action: %s", trg.TriggerID, err)
+				return
+			}
+
 			log.Infof("Trigger %s action fired", trg.TriggerID)
+			go workspace.checkpointTriggers()
 		}
 	}
-
-	resultChan <- condition
 }
 
 func (workspace *Workspace) updateTriggers() {
@@ -186,44 +187,17 @@ func (workspace *Workspace) startEventSources() {
 	}
 }
 
-func (workspace *Workspace) checkpointTriggers(subject string, numTriggers int, resultChan chan bool) {
-	cnt := 0
-	checkpoint := true
-
-	for result := range resultChan {
-		if !result {
-			checkpoint = false
-			break
-		}
-		cnt++
-		if cnt >= numTriggers {
-			break
-		}
+func (workspace *Workspace) checkpointTriggers() {
+	for _, eventSource := range workspace.EventSources {
+		go eventSource.CommitEvents()
 	}
 
-	close(resultChan)
-
-	if checkpoint {
-		for _, eventSource := range workspace.EventSources {
-			go eventSource.CommitEvents(subject)
-			//eventSource.CommitEvents(subject)
-		}
-
-		for trgID, trg := range workspace.Triggers {
-			if trg.Context.Modified {
-				trg.Lock.Lock()
-				encodedTrigger, err := trigger.MarshalJSONTrigger(trg)
-				trg.Context.Modified = false
-				trg.Lock.Unlock()
-				if err != nil {
-					log.Errorf("Could not checkpoint trigger %s", trgID)
-				} else {
-					//workspace.TriggerStorage.Put(workspace.WorkspaceName, "triggers", trgID, encodedTrigger)
-					go workspace.TriggerStorage.Put(workspace.WorkspaceName, "triggers", trgID, encodedTrigger)
-				}
-
-			}
+	for trg := range workspace.CheckpointChannel {
+		encodedTrigger, err := trigger.MarshalJSONTrigger(trg)
+		if err != nil {
+			log.Errorf("Could not checkpoint trigger %s", trg.TriggerID)
+		} else {
+			go workspace.TriggerStorage.Put(workspace.WorkspaceName, "triggers", trg.TriggerID, encodedTrigger)
 		}
 	}
-
 }
