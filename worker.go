@@ -86,12 +86,11 @@ func (workspace *Workspace) processTrigger(trg *trigger.Trigger) {
 			err = trg.Action(trg.Context, *event)
 			if err != nil {
 				log.Errorf("Error while processing <%s> action: %s", trg.TriggerID, err)
-			} else {
-				log.Infof("Trigger %s action fired", trg.TriggerID)
+				return
 			}
 
-			//workspace.CheckpointChannel <- trg
-			//go workspace.checkpointTriggers(event.Subject())
+			log.Infof("Trigger %s action fired", trg.TriggerID)
+			go workspace.checkpointTriggers()
 		}
 	}
 }
@@ -188,10 +187,9 @@ func (workspace *Workspace) startEventSources() {
 	}
 }
 
-func (workspace *Workspace) checkpointTriggers(subject string) {
+func (workspace *Workspace) checkpointTriggers() {
 	for _, eventSource := range workspace.EventSources {
 		go eventSource.CommitEvents()
-		//eventSource.CommitEvents(subject)
 	}
 
 	for trg := range workspace.CheckpointChannel {
@@ -199,7 +197,6 @@ func (workspace *Workspace) checkpointTriggers(subject string) {
 		if err != nil {
 			log.Errorf("Could not checkpoint trigger %s", trg.TriggerID)
 		} else {
-			//workspace.TriggerStorage.Put(workspace.WorkspaceName, "triggers", trgID, encodedTrigger)
 			go workspace.TriggerStorage.Put(workspace.WorkspaceName, "triggers", trg.TriggerID, encodedTrigger)
 		}
 	}

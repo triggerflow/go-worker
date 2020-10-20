@@ -58,9 +58,7 @@ func PassAction(context *Context, event cloudevents.Event) error {
 
 func TerminateAction(context *Context, event cloudevents.Event) error {
 	// TODO implement worker halt
-	//fmt.Println(context.ConditionParsedData.(Join).Counter, time.Now().UTC().UnixNano())
-	parsedData := (*context).ConditionParsedData.(*Join)
-	fmt.Printf("%v %v %v\n", context.TriggerID, parsedData.Counter, time.Now().UTC().UnixNano())
+	fmt.Println(time.Now().UTC().UnixNano())
 	log.Infof("Terminate worker call")
 	return nil
 }
