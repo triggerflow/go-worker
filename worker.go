@@ -190,7 +190,7 @@ func (workspace *Workspace) startEventSources() {
 
 func (workspace *Workspace) checkpointTriggers(subject string) {
 	for _, eventSource := range workspace.EventSources {
-		go eventSource.CommitEvents(subject)
+		go eventSource.CommitEvents()
 		//eventSource.CommitEvents(subject)
 	}
 

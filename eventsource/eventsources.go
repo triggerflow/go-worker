@@ -14,6 +14,6 @@ var Constructors = map[string]func(string, chan *cloudevents.Event, json.RawMess
 
 type EventSource interface {
 	StartConsuming()
-	CommitEvents(subject string)
+	CommitEvents()
 	Stop()
 }

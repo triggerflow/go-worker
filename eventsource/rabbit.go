@@ -2,21 +2,19 @@ package eventsource
 
 import (
 	"encoding/json"
-	"fmt"
 	cloudevents "github.com/cloudevents/sdk-go"
 	log "github.com/sirupsen/logrus"
 	rabbit "github.com/streadway/amqp"
-	"sync"
-	"time"
+	"sync/atomic"
 )
 
 type RabbitMQEventSource struct {
-	rabbitConn     *rabbit.Connection
-	rabbitChan     *rabbit.Channel
-	rabbitQueue    *rabbit.Queue
-	workspace      string
-	eventSink      chan *cloudevents.Event
-	messageRecords sync.Map
+	rabbitConn      *rabbit.Connection
+	rabbitChan      *rabbit.Channel
+	rabbitQueue     *rabbit.Queue
+	workspace       string
+	eventSink       chan *cloudevents.Event
+	lastDeliveryTag uint64
 }
 
 func CreateRabbitMQEventSource(workspace string, eventSink chan *cloudevents.Event, queue string, amqpURL string) EventSource {
@@ -41,27 +39,27 @@ func CreateRabbitMQEventSource(workspace string, eventSink chan *cloudevents.Eve
 	)
 
 	rabbitEs := RabbitMQEventSource{
-		rabbitConn:     conn,
-		rabbitChan:     ch,
-		rabbitQueue:    &q,
-		workspace:      workspace,
-		eventSink:      eventSink,
-		messageRecords: sync.Map{},
+		rabbitConn:      conn,
+		rabbitChan:      ch,
+		rabbitQueue:     &q,
+		workspace:       workspace,
+		eventSink:       eventSink,
+		lastDeliveryTag: 0,
 	}
 
 	return &rabbitEs
 }
 
 func CreateRabbitMQEventSourceMappedConfig(workspace string, eventSink chan *cloudevents.Event, config json.RawMessage) EventSource {
-	JSONconfig := make(map[string]interface{})
+	JSONConfig := make(map[string]interface{})
 
-	err := json.Unmarshal(config, &JSONconfig)
+	err := json.Unmarshal(config, &JSONConfig)
 	if err != nil {
 		panic(err)
 	}
 
-	queue := JSONconfig["queue"].(string)
-	amqpURL := JSONconfig["amqp_url"].(string)
+	queue := JSONConfig["queue"].(string)
+	amqpURL := JSONConfig["amqp_url"].(string)
 
 	return CreateRabbitMQEventSource(workspace, eventSink, queue, amqpURL)
 }
@@ -72,11 +70,11 @@ func (rabbitEs *RabbitMQEventSource) StartConsuming() {
 	msgs, err := rabbitEs.rabbitChan.Consume(
 		rabbitEs.rabbitQueue.Name, // queue
 		rabbitEs.workspace,        // consumer
-		false,             // auto-ack
-		false,            // exclusive
-		false,             // no-local
-		false,              // no-wait
-		nil,                 // args
+		false,                     // auto-ack
+		false,                     // exclusive
+		false,                     // no-local
+		false,                     // no-wait
+		nil,                       // args
 	)
 
 	if err != nil {
@@ -85,33 +83,22 @@ func (rabbitEs *RabbitMQEventSource) StartConsuming() {
 
 	log.Infof("[RabbitMQEventSource] Consuming from queue %s", rabbitEs.rabbitQueue.Name)
 
-	first := true
-	for d := range msgs {
-		if first {
-			fmt.Println(time.Now().UTC().UnixNano())
-			first = false
-		}
-		go func(message rabbit.Delivery) {
+	for msg := range msgs {
+		go func(message *rabbit.Delivery) {
 			cloudevent, err := DecodeCloudEventBytes(message.Body)
 			if err != nil {
 				panic(err)
 			}
 
 			rabbitEs.eventSink <- cloudevent
-			rabbitEs.messageRecords.Store(cloudevent.Subject(), d.DeliveryTag)
-
-		}(d)
+			atomic.StoreUint64(&rabbitEs.lastDeliveryTag, message.DeliveryTag)
+		}(&msg)
 	}
 }
 
-func (rabbitEs *RabbitMQEventSource) CommitEvents(subject string) {
-	log.Infof("[RabbitMQEventSource] Going to commit events from subject %s", subject)
-
-	value, ok := rabbitEs.messageRecords.Load(subject)
-	if !ok {
-		return
-	}
-	deliveryTag := value.(uint64)
+func (rabbitEs *RabbitMQEventSource) CommitEvents() {
+	deliveryTag := atomic.LoadUint64(&rabbitEs.lastDeliveryTag)
+	log.Infof("[RabbitMQEventSource] Going to commit messages prior to delivery tag %v", deliveryTag)
 	err := rabbitEs.rabbitChan.Ack(deliveryTag, true)
 	if err != nil {
 		panic(err)

@@ -2,6 +2,7 @@ package eventsource
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -9,7 +10,7 @@ import (
 	cloudevents "github.com/cloudevents/sdk-go"
 	log "github.com/sirupsen/logrus"
 	"github.com/valyala/fastjson"
-	"sync"
+	"time"
 )
 
 type SQSEventSource struct {
@@ -18,8 +19,8 @@ type SQSEventSource struct {
 	queueUrl   string
 	workspace  string
 	eventSink  chan *cloudevents.Event
-	consumed   sync.Map
-	records    sync.Map
+	records    []*string
+	consumed   map[string]*string
 }
 
 func CreateSQSEventSource(workspace string, eventSink chan *cloudevents.Event, accessKeyID string, secretAccessKey string, region string, queue string) EventSource {
@@ -47,8 +48,8 @@ func CreateSQSEventSource(workspace string, eventSink chan *cloudevents.Event, a
 		queueUrl:   *queueUrlOutput.QueueUrl,
 		workspace:  workspace,
 		eventSink:  eventSink,
-		records:    sync.Map{},
-		consumed:   sync.Map{},
+		records:    make([]*string, 0),
+		consumed:   make(map[string]*string),
 	}
 
 	return sqsEs
@@ -66,8 +67,9 @@ func (sqsEs *SQSEventSource) StartConsuming() {
 	var (
 		obj []byte
 		p   fastjson.Parser
+		seconds int64 = 1
 	)
-	seconds := int64(1)
+
 	first := true
 	log.Infof("[SQSEventSource] Starting to consume from queue %s", sqsEs.queueUrl)
 	for {
@@ -80,61 +82,42 @@ func (sqsEs *SQSEventSource) StartConsuming() {
 		}
 
 		if first {
-			//fmt.Println(time.Now().UTC().UnixNano())
+			fmt.Println(time.Now().UTC().UnixNano())
 			first = false
 		}
 
 		for _, message := range receiveMessageOutput.Messages {
-			if _, ok := sqsEs.consumed.Load(*message.MessageId); ok {
+			if _, ok := sqsEs.consumed[*message.MessageId]; ok {
 				continue
 			}
 
-			message := message
-			go func() {
-				var record []string
+			sqsEs.consumed[*message.MessageId] = message.ReceiptHandle
+			rawBody := []byte(*message.Body)
 
-				sqsEs.consumed.Store(*message.MessageId, message.ReceiptHandle)
-				rawBody := []byte(*message.Body)
-
-				if fastjson.GetString(rawBody, "specversion") == "" {
-					log.Debugf("[SQSEventSource] Received lambda destination event, cast to cloudevent")
-					parsed, err := p.ParseBytes(rawBody)
-					if err != nil {
-						panic(err)
-					}
-					obj = parsed.GetObject("responsePayload").MarshalTo(make([]byte, 0))
-				} else {
-					obj = rawBody
-				}
-
-				cloudevent, err := DecodeCloudEventBytes(obj)
+			if fastjson.GetString(rawBody, "specversion") == "" {
+				log.Debugf("[SQSEventSource] Received lambda destination event, cast to cloudevent")
+				parsed, err := p.ParseBytes(rawBody)
 				if err != nil {
 					panic(err)
 				}
+				obj = parsed.GetObject("responsePayload").MarshalTo(make([]byte, 0))
+			} else {
+				obj = rawBody
+			}
 
-				sqsEs.eventSink <- cloudevent
+			cloudevent, err := DecodeCloudEventBytes(obj)
+			if err != nil {
+				panic(err)
+			}
 
-				value, ok := sqsEs.records.Load(cloudevent.Subject())
-				if !ok {
-					record = make([]string, 0)
-				} else {
-					record = value.([]string)
-				}
-				record = append(record, *message.MessageId)
-				sqsEs.records.Store(cloudevent.Subject(), record)
-			}()
-
+			sqsEs.eventSink <- cloudevent
+			sqsEs.records = append(sqsEs.records, message.MessageId)
 		}
 	}
 }
 
-func (sqsEs *SQSEventSource) CommitEvents(subject string) {
-	var receiptHandle *string
-	value, ok := sqsEs.records.Load(subject)
-	if !ok {
-		return
-	}
-	records := value.([]string)
+func (sqsEs *SQSEventSource) CommitEvents() {
+	records := sqsEs.records
 
 	recordsLen := len(records) / 10
 
@@ -142,17 +125,14 @@ func (sqsEs *SQSEventSource) CommitEvents(subject string) {
 		entries := make([]*sqs.DeleteMessageBatchRequestEntry, 10)
 		for j := 0; j < 10; j++ {
 			record := records[(10*i)+j]
-			value, ok := sqsEs.consumed.Load(record)
-			if ok {
-				receiptHandle = value.(*string)
-			}
+			receiptHandle := sqsEs.consumed[*record]
 			entries[j] = &sqs.DeleteMessageBatchRequestEntry{
 				ReceiptHandle: receiptHandle,
-				Id:            aws.String(record),
+				Id:            record,
 			}
-			sqsEs.consumed.Delete(record)
+			delete(sqsEs.consumed, *record)
 		}
-		log.Debugf("[SQSEventSource] Going to commit %d events (subject %s)", len(entries), subject)
+		log.Debugf("[SQSEventSource] Going to commit %v events", len(entries))
 		delMsgRequest := sqs.DeleteMessageBatchInput{
 			Entries:  entries,
 			QueueUrl: &sqsEs.queueUrl,
@@ -168,17 +148,14 @@ func (sqsEs *SQSEventSource) CommitEvents(subject string) {
 		entries := make([]*sqs.DeleteMessageBatchRequestEntry, recordsMod)
 		for j := 0; j < recordsMod; j++ {
 			record := records[(10*recordsLen)+j]
-			value, ok := sqsEs.consumed.Load(record)
-			if ok {
-				receiptHandle = value.(*string)
-			}
+			receiptHandle := sqsEs.consumed[*record]
 			entries[j] = &sqs.DeleteMessageBatchRequestEntry{
 				ReceiptHandle: receiptHandle,
-				Id:            aws.String(record),
+				Id:            record,
 			}
-			sqsEs.consumed.Delete(record)
+			delete(sqsEs.consumed, *record)
 		}
-		log.Debugf("[SQSEventSource] Going to commit %d events (subject %s)", len(entries), subject)
+		log.Debugf("[SQSEventSource] Going to commit %v events", len(entries))
 		delMsgRequest := sqs.DeleteMessageBatchInput{
 			Entries:  entries,
 			QueueUrl: &sqsEs.queueUrl,
@@ -189,7 +166,7 @@ func (sqsEs *SQSEventSource) CommitEvents(subject string) {
 		}
 	}
 
-	sqsEs.records.Delete(subject)
+	sqsEs.records = make([]*string, 0)
 }
 
 func (sqsEs *SQSEventSource) Stop() {

@@ -9,6 +9,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"sync"
 	"time"
+	"triggerflow/config"
 )
 
 type KafkaEventSource struct {
@@ -29,7 +30,7 @@ func CreateKafkaEventSource(workspace string, eventSink chan *cloudevents.Event,
 
 	topicConfig := kafka.TopicConfig{
 		Topic:             topic,
-		NumPartitions:     3,
+		NumPartitions:     1,
 		ReplicationFactor: 1,
 	}
 	err = conn.CreateTopics(topicConfig)
@@ -57,13 +58,13 @@ func CreateKafkaEventSource(workspace string, eventSink chan *cloudevents.Event,
 func CreateKafkaEventSourceMappedConfig(workspace string, eventSink chan *cloudevents.Event,
 	config json.RawMessage) EventSource {
 
-	JSONconfig := make(map[string]interface{})
-	err := json.Unmarshal(config, &JSONconfig)
+	JSONConfig := make(map[string]interface{})
+	err := json.Unmarshal(config, &JSONConfig)
 	if err != nil {
 		panic(err)
 	}
-	topic := JSONconfig["topic"].(string)
-	auxBootstrapBrokers := JSONconfig["broker_list"].([]interface{})
+	topic := JSONConfig["topic"].(string)
+	auxBootstrapBrokers := JSONConfig["broker_list"].([]interface{})
 	bootstrapBrokers := make([]string, len(auxBootstrapBrokers))
 	for i, bootstrapBroker := range auxBootstrapBrokers {
 		bootstrapBrokers[i] = bootstrapBroker.(string)
@@ -73,6 +74,14 @@ func CreateKafkaEventSourceMappedConfig(workspace string, eventSink chan *cloude
 }
 
 func (kafkaEs *KafkaEventSource) StartConsuming() {
+	recordsChan := make(chan kafka.Message, config.SinkMaxSize)
+
+	go func(messageChannel chan kafka.Message) {
+		for message := range messageChannel {
+			kafkaEs.records = append(kafkaEs.records, message)
+		}
+	}(recordsChan)
+
 	first := true
 	for {
 		m, err := kafkaEs.kafkaReader.FetchMessage(context.Background())
@@ -85,21 +94,17 @@ func (kafkaEs *KafkaEventSource) StartConsuming() {
 			first = false
 		}
 
-		go func(message kafka.Message) {
-			cloudevent, err := DecodeCloudEventBytes(message.Value)
-			if err != nil {
-				panic(err)
-			}
+		cloudevent, err := DecodeCloudEventBytes(m.Value)
+		if err != nil {
+			panic(err)
+		}
 
-			kafkaEs.eventSink <- cloudevent
-			kafkaEs.recordsLock.Lock()
-			kafkaEs.records = append(kafkaEs.records, message)
-			kafkaEs.recordsLock.Unlock()
-		}(m)
+		kafkaEs.eventSink <- cloudevent
+		recordsChan <- m
 	}
 }
 
-func (kafkaEs *KafkaEventSource) CommitEvents(subject string) {
+func (kafkaEs *KafkaEventSource) CommitEvents() {
 	ctx := context.Background()
 	log.Infof("[KafkaEventSource] Going to commit %d messages", len(kafkaEs.records))
 	err := kafkaEs.kafkaReader.CommitMessages(ctx, kafkaEs.records...)

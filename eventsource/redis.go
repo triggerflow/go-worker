@@ -85,7 +85,7 @@ func (redisEs *RedisEventSource) StartConsuming() {
 
 		values := events[0].Messages
 		lastID = values[len(values)-1].ID
-		//log.Debugf("[RedisEventSource] Pulled %d events", len(values))
+		log.Debugf("[RedisEventSource] Pulled %d events", len(values))
 
 		first := true
 		for _, value := range values {
@@ -93,6 +93,7 @@ func (redisEs *RedisEventSource) StartConsuming() {
 				fmt.Println(time.Now().UTC().UnixNano())
 				first = false
 			}
+
 			go func(rawEvent map[string]interface{}, ID string) {
 				cloudevent := cloudevents.NewEvent()
 				cloudevent.SetSpecVersion(rawEvent["specversion"].(string))
@@ -109,17 +110,17 @@ func (redisEs *RedisEventSource) StartConsuming() {
 					}
 				}
 
-				//redisEs.recordsLock.Lock()
 				redisEs.eventSink <- &cloudevent
-				//redisEs.records = append(redisEs.records, ID)
-				//redisEs.recordsLock.Unlock()
+				redisEs.recordsLock.Lock()
+				redisEs.records = append(redisEs.records, ID)
+				redisEs.recordsLock.Unlock()
 
 			}(value.Values, value.ID)
 		}
 	}
 }
 
-func (redisEs *RedisEventSource) CommitEvents(subject string) {
+func (redisEs *RedisEventSource) CommitEvents() {
 	log.Infof("[RedisEventSource] Going to commit %d events", len(redisEs.records))
 	redisEs.client.XDel(redisEs.stream, redisEs.records...)
 	redisEs.records = make([]string, 0)
