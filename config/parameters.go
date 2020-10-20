@@ -62,7 +62,7 @@ func UpdateParameters() {
 }
 
 func SetLogLevel() {
-	loglevel := os.Getenv("LOG_LEVEL")
+	loglevel := os.Getenv("TRIGGERFLOW_LOG_LEVEL")
 	loglevel = strings.ToUpper(loglevel)
 	switch loglevel {
 	case "TRACE":
@@ -80,6 +80,6 @@ func SetLogLevel() {
 	case "PANIC":
 		log.SetLevel(log.PanicLevel)
 	default:
-		log.SetLevel(log.PanicLevel)
+		log.SetLevel(log.ErrorLevel)
 	}
 }
